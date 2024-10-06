@@ -1,0 +1,53 @@
+///
+/// @file include/assert
+///
+#ifndef ASSERT
+#define ASSERT
+
+///
+/// ASSERT, ASSERT_MSG, ASSERT_IS_VOID
+///
+#undef ASSERT
+#undef ASSERT_MSG
+#undef ASSERT_IS_VOID
+
+#if defined (ASSERT_DISABLE) || defined(NDEBUG)
+
+#define ASSERT(expr) ((void)0)
+#define ASSERT_MSG(expr, msg) ((void)0)
+#define ASSERT_IS_VOID
+
+
+#else
+#pragma once
+#include <cassert>
+#include <cstdlib>
+#include <iostream>
+
+#define ASSERT(expr) \
+  if (!(expr)) { \
+    std::cerr << "Assertion Failed: " #expr \
+              << ", file " << __FILE__ \
+              << ", line " << __LINE__ \
+              << std::endl; \
+    assert(expr);  \
+  }
+
+
+#define ASSERT_MSG(expr, msg) \
+  if (!(expr)) { \
+    std::cerr << "Assertion Failed: " #expr \
+              << ", message : " << msg \
+              << ", file " << __FILE__ \
+              << ", line " << __LINE__ \
+              << std::endl; \
+    assert(expr);  \
+  }
+
+#if defined(NDEBUG)
+#define ASSERT_IS_VOID
+#endif 
+
+#endif // end of define ASSERT, ASSERT_MSG, ASSERT_IS_VOID
+
+#endif // define ASSERT

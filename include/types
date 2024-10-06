@@ -1,0 +1,266 @@
+///
+/// @file include/types
+#pragma once
+#ifndef TYPES
+#define TYPES
+
+
+#include <iostream>
+#include <assert>
+#include <vector>
+#include <numeric>
+#include <initializer_list>
+
+
+using Float = float;
+using Word  = uint16_t;
+using Dword = uint32_t;
+
+typedef std::size_t size_type;
+
+
+
+namespace Matrix_impl
+{
+  // Requesting_element
+} // namespace Matrix_impl
+
+
+
+
+
+struct slice 
+{
+  static slice all;
+  size_type start;   // first index
+  size_type length;  // number of indices included (can be used for range checking)
+  size_type stride;  // distance between elements in sequence
+
+  slice()                                           : start {0}, length {0}, stride {1} { }
+  explicit slice( size_type s)                      : start {s}, length {0}, stride {1} { }
+  slice(size_type s, size_type l, size_type n = 1)  : start {s}, length {l}, stride {n} { } 
+
+  size_type operator()(size_type i) const           { return start + i * stride; }
+
+}; // end of struct slice
+
+
+template <size_type N>
+struct Matrix_slice 
+{
+  size_type size;                           // total number of elements
+  size_type start;                          // starting offset
+  std::array<size_type, N> extents;         // number of elements in each dimension
+  std::array<size_type, N> strides;         // offsets between elements in each dimension
+
+  Matrix_slice() = default;                 // an empty matrix: no elements
+
+  Matrix_slice(size_type offset, std::initializer_list<size_type> exts)                   // starting offset and extents
+  : start {offset}
+  {
+    ASSERT_MSG((N == exts.size()), "Dimension mismatch.");
+    std::copy(exts.begin(),
+              exts.end(),
+              extents.begin());
+
+    size_type stride {1};
+    for (size_type i = N; i-- > 0; )
+    {
+      strides[i] = stride;
+      stride *= extents[i];
+    }
+    size = stride;
+
+    print_info();
+  }
+
+  Matrix_slice(size_type offset, std::initializer_list<size_type> exts, std::initializer_list<size_type> strs); // and strides
+
+
+  template <typename ... Dims>              // N extents
+    Matrix_slice(Dims ... dims)
+    : start {0}
+    {
+      ASSERT_MSG((N == sizeof...(dims)), "Number of Dimension mismatch.");
+      extents = { static_cast<size_type>(dims)...};
+
+      size_type stride {1};
+      for (size_type i = N; i-- > 0; )
+      {
+        strides[i] = stride;
+        stride *= extents[i];
+      }
+      size = stride;
+
+      print_info();
+    } 
+
+  // template <typename ... Dims, 
+  //           typename = std::enable_if<All(Convertible<Dims, size_type>()...)>>
+  //   size_type operator()(Dims ... dims) const           // calculate index from a set of subscripts
+  //   {
+  //     std::cout << "Calling Duo-template operator." << std::endl;
+  //     std::array<size_type, N> indices = { static_case<size_type>(dims)... };
+
+  //     for (size_type i = 0; i < N; ++i)
+  //     {
+  //       if (indices[i] >= extents[i])
+  //       {
+  //         throw std::out_of_range("Index out of range.");
+  //       }
+  //     }
+
+  //     size_type index {start};
+  //     for (size_type i = 0; i < N; ++i) index += indices[i] * strides[i];
+
+  //     return index;
+  //   }
+
+  template <typename ... Dims>
+    size_type operator()(Dims ... dims) const 
+    {
+      std::cout << "Calling uni-template operator." << std::endl;
+      static_assert(sizeof...(Dims)==N, "Matrix_slice<N>::operator(): dimension mismatch");
+      size_type args[N] { size_type(dims) ...}; // Copy arguments into an array
+      return start + std::inner_product(args, args+N, strides.begin(), size_type{0});
+    }
+
+
+  void print_info() const
+  {
+    std::cout << "Starting offset: " << start << std::endl;
+    std::cout << "Extents: ";
+    for (auto e : extents) {
+        std::cout << e << " ";
+    }
+    std::cout << std::endl;
+
+    std::cout << "Strides: ";
+    for (auto s : strides) {
+        std::cout << s << " ";
+    }
+    std::cout << std::endl;
+
+    std::cout << "Total size: " << size << std::endl;
+  }
+
+}; // end of struct Matrix_slice
+
+
+template <typename T, size_type N>
+class Matrix_ref
+{
+  public:
+  Matrix_ref(const Matrix_slice<N> & s, T* p) : desc {s}, ptr {p} {}
+  // mostly like Matrix ...
+  Matrix_ref()  = default;
+  Matrix_ref(Matrix_ref &&)             = default;
+  Matrix_ref& operator=(Matrix_ref &&)  = default;
+  Matrix_ref(const Matrix_ref & )           = default;
+  Matrix_ref& operator=(const Matrix_ref &) = default;
+  ~Matrix_ref() = default;
+
+
+  private:
+  Matrix_slice<N> desc; // the shape of Matrix
+  T* ptr;
+
+}; // end of class Matrix_ref
+
+
+
+
+template <typename T, size_type N>
+class Matrix 
+{
+  private:
+  Matrix_slice<N> desc; // slice defining extents in the N dimensions.
+  std::vector<T> elems; // the elements.
+  
+
+  public:
+  static constexpr size_type order = N; // number of Dimensions.
+
+  using value_type      = T;
+  using iterator        = typename std::vector<T>::iterator;
+  using const_iterator  = typename std::vector<T>::const_iterator;
+
+  Matrix()          = default;
+  Matrix(Matrix &&) = default;                  // move
+  Matrix& operator=(Matrix &&) = default;
+  Matrix(const Matrix &)       = default;       // copy
+  Matrix& operator=(const Matrix &)  = default;
+  ~Matrix() = default;
+
+
+  template <typename U>
+    Matrix(const Matrix_ref<U, N> &);               // construct from Matrix_ref
+  template <typename U>
+    Matrix& operator=(const Matrix_ref<U, N> &);    // assign from Matrix_ref
+
+  template <typename ... Exts>                      // specify the extents
+    explicit Matrix(Exts ... exts)
+    : desc { exts... },  // Copy Extents
+    elems ( desc.size )   // Allocate desc.size elements and default initialize them
+    { std::cout << "Calling Extents for constructing Matrix." << std::endl; }
+
+  // Matrix(Matrix_initializer<T, N> init)                 // initializer from list
+  // {
+  //   desc.extents = Matrix_impl::derive_extents(init);   // deduce extents from initializer list
+  //   Matrix_impl::compute_strides(desc);                 // compute strides and size
+  //   elems.reserve(desc.size);                           // make room for slices
+  //   ASSERT_TETRIS((elems.size() == desc.size));
+  // }
+  // Matrix& operator=(Matrix_initializer<T, N>);      // assign from list
+
+
+
+
+  template <typename U>
+    Matrix(std::initializer_list<U>)            = delete;  // don't user {} except for elements;
+  template <typename U>
+    Matrix& operator=(std::initializer_list<U>) = delete;
+
+  
+
+  size_type extent(size_type n) const { return desc.extents[n]; } // #elements in the n.th dimension
+  size_type size() const { return elems.size(); }                 // total number of elements
+  // const Matrix slice<N> & descriptor() const { return desc; }     // the slice defining subscripting
+
+        T* data()       { return elems.data(); }   // "flat" element access
+  const T* data() const { return elems.data(); }
+
+  // ...
+
+  // Subscripting & Slicing
+  // template <typename ... Args>
+  //   std::enable_if<Matrix_impl::Requesting_element<Args ...>(), T&>
+  //   T operator()(Args ... args);
+
+  Matrix_ref<T, N-1> operator[](size_type i) { return row(i); };    // m[i], row access
+  Matrix_ref<const T, N-1> operator[](size_type i) const { return row(i); }
+
+  Matrix_ref<T, N-1> row(size_type n);        // row access
+  Matrix_ref<const T, N-1> row(size_type n) const;
+
+  Matrix_ref<T, N-1> col(size_type n);        // column access
+  Matrix_ref<const T, N-1> col(size_type n) const;
+
+  
+
+
+
+}; // end of class Matrix
+
+
+
+
+
+
+
+
+
+
+
+
+#endif // define TYPES
